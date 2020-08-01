@@ -1,0 +1,13 @@
+version: '3.2'
+
+services:
+  aerospike:
+    image: aerospike/aerospike-server
+    ports:
+      - '3000:3000'
+    volumes:
+      - aerospike-data:/opt/aerospike/etc
+
+volumes:
+  aerospike-data:
+    driver: local

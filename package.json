@@ -1,0 +1,18 @@
+{
+  "name": "db-test",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "dependencies": {
+    "@elastic/elasticsearch": "7",
+    "aerospike": "^3.16.1",
+    "cassandra-driver": "^4.5.2",
+    "dgraph-js": "^20.3.0",
+    "faker": "^4.1.0",
+    "grpc": "^1.24.3"
+  },
+  "volta": {
+    "node": "12.16.3",
+    "yarn": "1.22.4"
+  }
+}
