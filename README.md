@@ -14,6 +14,8 @@ I try my best to model a minimal table structure on every data storage, where ev
 
 Here are the results:
 
+```
 Aerospike: 12.583s (no batching)
 Cassandra: 18.245s (no batching), 6.561s (batches of 10 rows)
 dGraph: 131.058s (batches of 100 rows), 305.051s (batches of 1000 rows)
+```
