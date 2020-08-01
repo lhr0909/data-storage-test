@@ -1,6 +1,6 @@
 # Benchmark between Data Storages
 
-This is a benchmark repository for various data storages we plan to use to store Treelab table data.
+This is a benchmark repository for various data storages to store table data.
 
 ## Hardware Spec
 
@@ -10,7 +10,7 @@ The benchmark report is generated on a MacBook Pro 2019 16-inch machine with 2.4
 
 ### Create Table Test
 
-I try my best to model a minimal Treelab Table on every data storage, where every cell is a text cell. The test will generate a table with 10k rows x 100 columns, which is a total of 1 million cells. Each cell will store a text string of length 20.
+I try my best to model a minimal table structure on every data storage, where every cell is a text cell. The test will generate a table with 10k rows x 100 columns, which is a total of 1 million cells. Each cell will store a text string of length 20.
 
 Here are the results:
 
