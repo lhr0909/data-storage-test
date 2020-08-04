@@ -75,7 +75,7 @@ async function batchInsertTable(client) {
 
   for (let row = 0; row < 10000; row++) {
     // await client.execute(query, [random.alphaNumeric(10)].concat(columns.map(n => random.alphaNumeric(20))), { prepare: true });
-    queries.push({ query, params: [random.alphaNumeric(10)].concat(columns.map(n => random.alphaNumeric(20))) });
+    queries.push({ query, params: [`row_${row}`].concat(columns.map(n => random.alphaNumeric(20))) });
     if ((row + 1) % 10 === 0) {
       await client.batch(queries, { prepare: true });
       queries = [];

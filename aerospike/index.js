@@ -3,13 +3,13 @@ const { random } = require('faker');
 const { Observable } = require('rxjs');
 const Ops = require('rxjs/operators');
 
-async function getClient() {
+async function getAerospikeClient() {
   const config = { hosts: 'localhost:3000' };
   return Aerospike.connect(config);
 }
 
-async function clearTable(client) {
-  return client.truncate('test', 'test_table', 0);
+async function clearAerospikeTable(client) {
+  return client.truncate('treelab', 'test_table', 0);
 }
 
 async function generateTable(client) {
@@ -22,7 +22,7 @@ async function generateTable(client) {
     for (let col = 0; col < 100; col++) {
       Object.assign(bins, { [`col_${col}`]: random.alphaNumeric(20) });
     }
-    const key = new Aerospike.Key('test', 'test_table', `row_${row}`);
+    const key = new Aerospike.Key('treelab', 'test_table', `row_${row}`);
 
     // console.log('pushing row', row);
     await client.put(key, bins, {}, policy);
@@ -31,7 +31,7 @@ async function generateTable(client) {
 
 async function fetchEntireTable(client) {
   return new Observable(subscriber => {
-    const scan = client.scan('test', 'test_table');
+    const scan = client.scan('treelab', 'test_table');
     scan.priority = Aerospike.scanPriority.AUTO;
     scan.percent = 100;
 
@@ -47,10 +47,10 @@ async function fetchEntireTable(client) {
 }
 
 (async function() {
-  const client = await getClient();
+  const client = await getAerospikeClient();
 
   console.log('clear table');
-  await clearTable(client);
+  await clearAerospikeTable(client);
 
   // table generate
   console.log('generating table');
@@ -65,6 +65,9 @@ async function fetchEntireTable(client) {
   console.timeEnd('table scan');
   console.log(table[0]);
   console.log(`scanned ${table.length}`);
+
+  // update column
+
 
   client.close();
 })();
