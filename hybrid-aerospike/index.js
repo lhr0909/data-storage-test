@@ -4,7 +4,7 @@ const { DgraphClient, DgraphClientStub, Mutation, Operation } = require('dgraph-
 const grpc = require('grpc');
 const Aerospike = require('aerospike');
 const pMap = require('p-map');
-const { Observable } = require('rxjs');
+const { from } = require('rxjs');
 const Ops = require('rxjs/operators');
 
 const PARALLELISM = 300;
@@ -140,6 +140,50 @@ async function fillTable(aerospikeClient, tableSkeleton) {
   return pMap(keys, mapper, { concurrency: PARALLELISM });
 }
 
+async function readTable(dGraphClient, aerospikeClient, tableUid) {
+  const txn = dGraphClient.newTxn({ readOnly: true });
+  const query = `{
+    table(func: uid(${tableUid})) {
+      uid
+      columns: has_column {
+        uid
+      }
+      rows: has_row {
+        uid
+      }
+    }
+  }`;
+  console.time('dgraph read table skeleton');
+  const response = await txn.query(query);
+  console.timeEnd('dgraph read table skeleton');
+
+  const responseJson = response.getJson();
+  const { rows } = responseJson.table[0];
+  const batchRequest = rows.map(row => ({
+    key: new Aerospike.Key('treelab', tableUid, row.uid),
+    read_all_bins: true,
+  }));
+
+  console.time('aerospike batch read table data');
+  const batchResult = await from(batchRequest).pipe(
+    Ops.bufferCount(2222), // https://www.aerospike.com/docs/reference/configuration/#batch-max-requests
+    Ops.concatMap((batch) => {
+      // console.log('batch request', batch.length);
+      return from(aerospikeClient.batchRead(batch));
+    }),
+    Ops.reduce((rows, batchResult) => {
+      // console.log('batch result', batchResult.length);
+      return rows.concat(batchResult.map(result => ({
+        uid: result.record.key.key,
+        cells: result.record.bins,
+      })));
+    }, []),
+  ).toPromise();
+  console.timeEnd('aerospike batch read table data');
+  responseJson.table[0].rows = batchResult;
+  return responseJson.table[0];
+}
+
 (async function() {
   const aerospikeClient = await getAerospikeClient();
   const dgraphClient = getDgraphClient();
@@ -155,5 +199,12 @@ async function fillTable(aerospikeClient, tableSkeleton) {
   console.timeEnd('fill in table cells');
 
   // console.log(tableSkeleton);
+  const table = await readTable(dgraphClient, aerospikeClient, tableSkeleton.tableUid);
+
+  console.log(table);
+  console.log('total cells', table.rows.reduce((cellCount, row) => {
+    return cellCount + Object.keys(row.cells).length;
+  }, 0));
+
   aerospikeClient.close();
 })();

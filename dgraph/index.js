@@ -91,7 +91,7 @@ async function generateTable(client) {
 
   console.log('dgraph read entire table');
   console.time('dgraph read table');
-  txn = client.newTxn({ readOnly: true });
+  const txn = client.newTxn({ readOnly: true });
   const query = `{
     table(func: uid(${tableUid})) {
       uid
@@ -103,7 +103,7 @@ async function generateTable(client) {
       }
     }
   }`;
-  response = await txn.query(query);
+  const response = await txn.query(query);
   console.timeEnd('dgraph read table');
   const json = response.getJson();
   console.log(json);
