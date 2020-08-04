@@ -3,10 +3,12 @@ version: '3.2'
 services:
   aerospike:
     image: aerospike/aerospike-server
+    command: ['--config-file', '/etc/aerospike/aerospike.conf']
     ports:
       - '3000:3000'
     volumes:
       - aerospike-data:/opt/aerospike/etc
+      # - ./config:/etc/aerospike
 
 volumes:
   aerospike-data:

@@ -3,20 +3,20 @@ const { random } = require('faker');
 const { Observable } = require('rxjs');
 const Ops = require('rxjs/operators');
 
-(async function() {
+async function getClient() {
   const config = { hosts: 'localhost:3000' };
-  const client = await Aerospike.connect(config);
+  return Aerospike.connect(config);
+}
 
-  console.log('clear table');
-  await client.truncate('test', 'test_table', 0);
+async function clearTable(client) {
+  return client.truncate('test', 'test_table', 0);
+}
+
+async function generateTable(client) {
   const policy = new Aerospike.WritePolicy({
     exists: Aerospike.policy.exists.CREATE_OR_REPLACE,
   });
 
-  // table generate
-
-  console.log('generating table');
-  console.time('generate table');
   for (let row = 0; row < 10000; row++) {
     const bins = {};
     for (let col = 0; col < 100; col++) {
@@ -27,30 +27,44 @@ const Ops = require('rxjs/operators');
     // console.log('pushing row', row);
     await client.put(key, bins, {}, policy);
   }
-  console.timeEnd('generate table');
+}
 
-  // table read
-
-  console.log('reading entire table');
-  console.time('table scan');
-  const table = new Observable(subscriber => {
+async function fetchEntireTable(client) {
+  return new Observable(subscriber => {
     const scan = client.scan('test', 'test_table');
     scan.priority = Aerospike.scanPriority.AUTO;
     scan.percent = 100;
 
     const stream = scan.foreach();
     stream.on('error', (err) => subscriber.error(err));
-    stream.on('end', () => {
-      client.close();
-      subscriber.complete();
-    });
+    stream.on('end', () => subscriber.complete());
     stream.on('data', (record) => subscriber.next(record));
   }).pipe(
     Ops.reduce((table, record) => {
       return table.concat([record]);
     }, []),
-  ).subscribe((table) => {
-    console.timeEnd('table scan');
-    console.log(`scanned ${table.length} rows`);
-  });
+  ).toPromise();
+}
+
+(async function() {
+  const client = await getClient();
+
+  console.log('clear table');
+  await clearTable(client);
+
+  // table generate
+  console.log('generating table');
+  console.time('generate table');
+  await generateTable(client);
+  console.timeEnd('generate table');
+
+  // table read
+  console.log('reading entire table');
+  console.time('table scan');
+  const table = await fetchEntireTable(client);
+  console.timeEnd('table scan');
+  console.log(table[0]);
+  console.log(`scanned ${table.length}`);
+
+  client.close();
 })();

@@ -11,7 +11,7 @@ function getCassandraClient() {
       username: 'cassandra',
       password: 'cassandra',
     },
-    queryOptions: { consistency: cassandra.types.consistencies.localOne },
+    queryOptions: { consistency: cassandra.types.consistencies.one },
   });
 
   return client;
@@ -102,6 +102,7 @@ async function batchInsertTable(client) {
   console.time('table scan');
   const rows = await fetchEntireTable(client);
   console.timeEnd('table scan');
+  console.log(rows[0]);
   console.log(`scanned ${rows.length} rows`);
 
   await client.shutdown();
