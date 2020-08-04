@@ -90,7 +90,7 @@ async function batchInsertTable(client) {
   console.log('setting up keyspace');
   await client.execute(`CREATE KEYSPACE IF NOT EXISTS treelab WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 3 };`);
   console.log('dropping table');
-  await client.execute(`DROP TABLE treelab.test_table;`);
+  await client.execute(`DROP TABLE IF EXISTS treelab.test_table;`);
 
   console.log('generating table');
   console.time('create cassandra table');

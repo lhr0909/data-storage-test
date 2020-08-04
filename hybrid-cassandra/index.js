@@ -2,23 +2,33 @@ const { random } = require('faker');
 const shuffle = require('shuffle-array');
 const { DgraphClient, DgraphClientStub, Mutation, Operation } = require('dgraph-js');
 const grpc = require('grpc');
-const Aerospike = require('aerospike');
-const pMap = require('p-map');
-const { from } = require('rxjs');
+const cassandra = require('cassandra-driver');
+const { from, Observable } = require('rxjs');
 const Ops = require('rxjs/operators');
 
-const PARALLELISM = 300;
-
-async function getAerospikeClient() {
-  return Aerospike.connect({
-    hosts: 'localhost:3000',
-    maxConnsPerNode: PARALLELISM,
+function getCassandraClient() {
+  const client = new cassandra.Client({
+    contactPoints: ['localhost'],
+    localDataCenter: 'datacenter1',
+    credentials: {
+      username: 'cassandra',
+      password: 'cassandra',
+    },
+    queryOptions: { consistency: cassandra.types.consistencies.one },
   });
+
+  return client;
 }
 
-// async function clearAerospikeTable(client) {
-//   return client.truncate('treelab', null, 0);
-// }
+async function clearCassandra(client) {
+  await client.execute('DROP KEYSPACE IF EXISTS treelab;');
+  await client.execute(`CREATE KEYSPACE IF NOT EXISTS treelab WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 3 };`);
+  await client.execute(`
+  CREATE TYPE treelab.text_cell (
+    text text,
+  );
+  `);
+}
 
 function getDgraphClient() {
   const stub = new DgraphClientStub('localhost:19080', grpc.credentials.createInsecure(), {
@@ -117,30 +127,38 @@ async function generateTableStructure(dGraphClient) {
   return result;
 }
 
-async function fillTable(aerospikeClient, tableSkeleton) {
-  const policy = new Aerospike.WritePolicy({
-    exists: Aerospike.policy.exists.CREATE_OR_REPLACE,
-  });
+async function fillTable(cassandraClient, tableSkeleton) {
+  let query = `
+  CREATE TABLE treelab.table_${tableSkeleton.tableUid} (
+    row_id text PRIMARY KEY,
+    ${tableSkeleton.columnUids.map(columnUid => `col_${columnUid} text_cell,`).join('\n')}
+  );
+  `;
 
-  const keys = tableSkeleton.rowUids.map(rowUid => new Aerospike.Key('treelab', tableSkeleton.tableUid, rowUid));
+  await cassandraClient.execute(query);
 
-  const mapper = async (key) => {
-    const bins = {};
-    for (let col = 0; col < 100; col++) {
-      // if (Math.random() > 0.5) {
-        Object.assign(bins, { [tableSkeleton.columnUids[col]]: { text: random.alphaNumeric(20) } });
-      // }
-    }
+  query = `
+  INSERT INTO treelab.table_${tableSkeleton.tableUid} (row_id,${tableSkeleton.columnUids.map(columnUid => `col_${columnUid}`).join(',')}) VALUES (?,${tableSkeleton.columnUids.map(() => '?').join(',')})
+  `;
 
-    // if (Math.random > 0.5) {
-      return aerospikeClient.put(key, bins, {}, policy);
-    // }
-  };
+  const queries = tableSkeleton.rowUids.map(rowUid => ({
+    query,
+    params: [rowUid].concat(tableSkeleton.columnUids.map(() => ({ text: random.alphaNumeric(20) }))),
+  }));
 
-  return pMap(keys, mapper, { concurrency: PARALLELISM });
+  return from(queries).pipe(
+    Ops.bufferCount(10),
+    Ops.concatMap((batch) => {
+      return from(cassandraClient.batch(batch, { prepare: true }));
+    }),
+    Ops.reduce((results, result) => {
+      results.push(result);
+      return results;
+    }, []),
+  ).toPromise();
 }
 
-async function readTable(dGraphClient, aerospikeClient, tableUid) {
+async function readTable(dGraphClient, cassandraClient, tableUid) {
   const txn = dGraphClient.newTxn({ readOnly: true });
   const query = `{
     table(func: uid(${tableUid})) {
@@ -159,47 +177,64 @@ async function readTable(dGraphClient, aerospikeClient, tableUid) {
 
   const responseJson = response.getJson();
   const { rows } = responseJson.table[0];
-  const batchRequest = rows.map(row => ({
-    key: new Aerospike.Key('treelab', tableUid, row.uid),
-    read_all_bins: true,
-  }));
 
-  console.time('aerospike batch read table data');
-  const batchResult = await from(batchRequest).pipe(
-    Ops.bufferCount(2222), // https://www.aerospike.com/docs/reference/configuration/#batch-max-requests
-    Ops.concatMap((batch) => {
-      // console.log('batch request', batch.length);
-      return from(aerospikeClient.batchRead(batch));
-    }),
-    Ops.reduce((rows, batchResult) => {
-      // console.log('batch result', batchResult.length);
-      return rows.concat(batchResult.map(result => ({
-        uid: result.record.key.key,
-        cells: result.record.bins,
-      })));
+  console.time('cassandra batch read table data');
+  const batchResult = await new Observable(subscriber => {
+    const query = `SELECT * from treelab.table_${tableUid} WHERE row_id IN (${rows.map(() => '?').join(',')});`;
+    const stream = cassandraClient.stream(query, rows.map(row => row.uid), { prepare: true });
+
+    stream.on('error', (err) => subscriber.error(err));
+    stream.on('end', () => subscriber.complete());
+    stream.on('readable', () => {
+      let row;
+
+      while (row = stream.read()) {
+        subscriber.next(row);
+      }
+    });
+  }).pipe(
+    Ops.reduce((result, row) => {
+      const uid = row.row_id;
+      const cells = {};
+
+      row.keys().forEach(key => {
+        if (key === 'row_id') {
+          return;
+        }
+
+        cells[key.slice(4)] = row.get(key);
+      });
+
+      result.push({
+        uid,
+        cells,
+      });
+
+      return result;
     }, []),
   ).toPromise();
-  console.timeEnd('aerospike batch read table data');
+  console.timeEnd('cassandra batch read table data');
+
   responseJson.table[0].rows = batchResult;
   return responseJson.table[0];
 }
 
 (async function() {
-  const aerospikeClient = await getAerospikeClient();
+  const cassandraClient = await getCassandraClient();
   const dgraphClient = getDgraphClient();
 
   console.time('clear db');
-  // await clearAerospikeTable(aerospikeClient);
+  await clearCassandra(cassandraClient);
   await clearDgraph(dgraphClient);
   console.timeEnd('clear db');
 
   const tableSkeleton = await generateTableStructure(dgraphClient);
   console.time('fill in table cells');
-  await fillTable(aerospikeClient, tableSkeleton);
+  await fillTable(cassandraClient, tableSkeleton);
   console.timeEnd('fill in table cells');
 
   // console.log(tableSkeleton);
-  const table = await readTable(dgraphClient, aerospikeClient, tableSkeleton.tableUid);
+  const table = await readTable(dgraphClient, cassandraClient, tableSkeleton.tableUid);
 
   // console.log(table);
   console.log(table.rows[0]);
@@ -207,5 +242,5 @@ async function readTable(dGraphClient, aerospikeClient, tableUid) {
     return cellCount + Object.keys(row.cells).length;
   }, 0));
 
-  aerospikeClient.close();
+  await cassandraClient.shutdown();
 })();
