@@ -12,17 +12,13 @@ function getDgraphClient() {
   return client;
 }
 
-(async function() {
-  const client = getDgraphClient();
-  console.log(client);
-  console.log('clear dgraph');
+async function clearDgraph(client) {
   const op = new Operation();
   op.setDropAll(true);
-  await client.alter(op);
+  return client.alter(op);
+}
 
-  console.log('generating table');
-  console.time('dgraph create table');
-
+async function generateTable(client) {
   let txn = client.newTxn();
 
   let nquads = `
@@ -43,6 +39,7 @@ function getDgraphClient() {
 
   const uids = response.getUidsMap();
   const tableUid = uids.get('table');
+  console.log('table uid', tableUid);
   const columnUids = [];
   for (let col = 0; col < 100; col++) {
     columnUids.push(uids.get(`col${col}`));
@@ -78,5 +75,37 @@ function getDgraphClient() {
     }
   }
 
+  return tableUid;
+}
+
+(async function() {
+  const client = getDgraphClient();
+
+  console.log('clear dgraph');
+  await clearDgraph(client);
+
+  console.log('generating table');
+  console.time('dgraph create table');
+  const tableUid = await generateTable(client);
   console.timeEnd('dgraph create table');
+
+  console.log('dgraph read entire table');
+  console.time('dgraph read table');
+  txn = client.newTxn({ readOnly: true });
+  const query = `{
+    table(func: uid(${tableUid})) {
+      uid
+      has_column {
+        uid
+      }
+      has_row {
+        uid
+      }
+    }
+  }`;
+  response = await txn.query(query);
+  console.timeEnd('dgraph read table');
+  const json = response.getJson();
+  console.log(json);
+  console.log(`fetched ${json.table[0].has_row.length} rows`);
 })();

@@ -9,7 +9,8 @@
     "cassandra-driver": "^4.5.2",
     "dgraph-js": "^20.3.0",
     "faker": "^4.1.0",
-    "grpc": "^1.24.3"
+    "grpc": "^1.24.3",
+    "rxjs": "^6.6.2"
   },
   "volta": {
     "node": "12.16.3",

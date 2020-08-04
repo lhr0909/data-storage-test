@@ -1,5 +1,7 @@
 const cassandra = require('cassandra-driver');
 const { random } = require('faker');
+const { Observable } = require('rxjs');
+const Ops = require('rxjs/operators');
 
 function getCassandraClient() {
   const client = new cassandra.Client({
@@ -33,6 +35,30 @@ async function createTableColumns(client) {
   return client.execute(query);
 }
 
+async function fetchEntireTable(client) {
+  return new Observable(subscriber => {
+    const query = `
+    SELECT * from treelab.test_table;
+    `;
+
+    const stream = client.stream(query, { prepare: true });
+
+    stream.on('error', (err) => subscriber.error(err));
+    stream.on('end', () => subscriber.complete());
+    stream.on('readable', () => {
+      let row;
+
+      while (row = stream.read()) {
+        subscriber.next(row);
+      }
+    });
+  }).pipe(
+    Ops.reduce((table, record) => {
+      return table.concat([record]);
+    }, []),
+  ).toPromise();
+}
+
 async function batchInsertTable(client) {
   const columns = [];
   for (let col = 0; col < 100; col++) {
@@ -61,12 +87,22 @@ async function batchInsertTable(client) {
   const client = getCassandraClient();
   // console.log(client);
 
+  console.log('setting up keyspace');
   await client.execute(`CREATE KEYSPACE IF NOT EXISTS treelab WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 3 };`);
+  console.log('dropping table');
   await client.execute(`DROP TABLE treelab.test_table;`);
+
+  console.log('generating table');
   console.time('create cassandra table');
   await createTableColumns(client);
   await batchInsertTable(client);
   console.timeEnd('create cassandra table');
+
+  console.log('reading entire table');
+  console.time('table scan');
+  const rows = await fetchEntireTable(client);
+  console.timeEnd('table scan');
+  console.log(`scanned ${rows.length} rows`);
 
   await client.shutdown();
 })();

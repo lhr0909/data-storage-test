@@ -19,3 +19,13 @@ Aerospike: 12.583s (no batching)
 Cassandra: 18.245s (no batching), 6.561s (batches of 10 rows)
 dGraph: 131.058s (batches of 100 rows), 305.051s (batches of 1000 rows)
 ```
+
+### Read Table Test
+
+The entire table is either streamed or read into memory and we time how long it takes with each storage. Cassandra default query only returns 5k rows so we will need to use row streaming.
+
+```
+Aerospike: 945.422ms
+Cassandra: 1172.764ms
+dGraph: 11.159s (read cells & text data), 2.828s (read only cell IDs), 48.327ms (read only rows and columns)
+```
